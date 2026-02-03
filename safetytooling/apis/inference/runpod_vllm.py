@@ -37,6 +37,7 @@ class VLLMChatModel(InferenceAPIModel):
         num_threads: int,
         prompt_history_dir: Path | None = None,
         vllm_base_url: str = "http://localhost:8000/v1/chat/completions",
+        vllm_api_key: str | None = None,
         runpod_api_key: str | None = None,
     ):
         self.num_threads = num_threads

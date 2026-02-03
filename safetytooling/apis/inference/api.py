@@ -470,16 +470,12 @@ class InferenceAPI:
                     # If prompt is a single prompt and there is no cached result, simply return the original prompt for regular processing
                     prompt = prompt
 
-<<<<<<< HEAD
-        if isinstance(model_class, AnthropicChatModel) or isinstance(model_class, HuggingFaceModel):
-=======
         if (
             isinstance(model_class, AnthropicChatModel)
             or isinstance(model_class, HuggingFaceModel)
             or isinstance(model_class, OpenRouterChatModel)
             or isinstance(model_class, VLLMChatModel)
         ):
->>>>>>> 11480a895f9e0035af02833f2e011eb25c17cec1
             if isinstance(model_class, HuggingFaceModel):
                 kwargs["model_url"] = huggingface_model_url
             # Anthropic chat doesn't support generating multiple candidates at once, so we have to do it manually
