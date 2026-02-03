@@ -20,6 +20,7 @@ wandb
 *.logs
 logs/
 SECRETS
+SECRET
 .checkpoints
 
 # IDE

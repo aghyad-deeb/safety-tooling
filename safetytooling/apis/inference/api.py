@@ -88,8 +88,9 @@ class InferenceAPI:
         anthropic_api_key: str | None = None,
         openai_api_key: str | None = None,
         print_prompt_and_response: bool = False,
-        use_vllm_if_model_not_found: bool = False,
+        use_provider_if_model_not_found: str | None = None,
         vllm_base_url: str = "http://localhost:8000/v1/chat/completions",
+        vllm_api_key: str | None = None,
         no_cache: bool = False,
         oai_embedding_batch_size: int = 2048,
         max_mem_usage_mb: float = 5_000,
@@ -116,7 +117,6 @@ class InferenceAPI:
         self.gemini_recitation_rate_threshold = gemini_recitation_rate_threshold
         self.gray_swan_num_threads = gray_swan_num_threads
         self.together_num_threads = together_num_threads
-        self.openrouter_num_threads = openrouter_num_threads
         self.huggingface_num_threads = huggingface_num_threads
         self.vllm_num_threads = vllm_num_threads
         self.deepseek_num_threads = deepseek_num_threads
@@ -127,8 +127,9 @@ class InferenceAPI:
         self.n_calls = 0
         self.gpt_4o_rate_limiter = S2SRateLimiter(self.gpt4o_s2s_rpm_cap)
         self.print_prompt_and_response = print_prompt_and_response
-        self.use_vllm_if_model_not_found = use_vllm_if_model_not_found
+        self.use_provider_if_model_not_found = use_provider_if_model_not_found
         self.vllm_base_url = vllm_base_url
+        self.vllm_api_key = vllm_api_key
         # can also set via env var
         if os.environ.get("SAFETYTOOLING_PRINT_PROMPTS", "false").lower() == "true":
             self.print_prompt_and_response = True
@@ -199,12 +200,6 @@ class InferenceAPI:
             api_key=os.environ.get("TOGETHER_API_KEY", None),
         )
 
-        self._openrouter = OpenRouterChatModel(
-            num_threads=self.openrouter_num_threads,
-            prompt_history_dir=self.prompt_history_dir,
-            api_key=os.environ.get("OPENROUTER_API_KEY", None),
-        )
-
         self._gemini_vertex = GeminiVertexAIModel(prompt_history_dir=self.prompt_history_dir)
         self._gemini_genai = GeminiModel(
             prompt_history_dir=self.prompt_history_dir,
@@ -217,7 +212,7 @@ class InferenceAPI:
             num_threads=vllm_num_threads,
             prompt_history_dir=self.prompt_history_dir,
             vllm_base_url=self.vllm_base_url,
-            runpod_api_key=os.environ.get("RUNPOD_API_KEY", None),
+            vllm_api_key=self.vllm_api_key,
         )
 
         # DeepSeek uses the OpenAI API
@@ -258,7 +253,6 @@ class InferenceAPI:
             "batch_gpu": self._batch_models,
             "openai_s2s": self._openai_s2s,
             "together": self._together,
-            "openrouter": self._openrouter,
             "vllm": self._vllm,
             "deepseek": self._deepseek,
         }
@@ -309,16 +303,14 @@ class InferenceAPI:
             return self._openai_s2s
         elif model_id in TOGETHER_MODELS or model_id.startswith("scalesafetyresearch"):
             return self._together
-        elif model_id in OPENROUTER_MODELS or model_id.startswith("openrouter/"):
-            return self._openrouter
         elif model_id in VLLM_MODELS:
             return self._vllm
         elif model_id in DEEPSEEK_MODELS:
             return self._deepseek
-        elif self.use_vllm_if_model_not_found:
-            return self._vllm
+        elif self.use_provider_if_model_not_found is not None:
+            return self.provider_to_class[self.use_provider_if_model_not_found]
         raise ValueError(
-            f"Invalid model id: {model_id}. Pass openai_completion, openai_chat, anthropic, huggingface, gemini, batch_gpu, openai_s2s, together, openrouter, vllm, or deepseek to force a provider."
+            f"Invalid model id: {model_id}. Pass openai_completion, openai_chat, anthropic, huggingface, gemini, batch_gpu, openai_s2s, together, vllm, or deepseek to force a provider."
         )
 
     async def check_rate_limit(self, wait_time=60):
@@ -383,7 +375,7 @@ class InferenceAPI:
         audio_out_dir: str | Path = None,
         print_prompt_and_response: bool = False,
         n: int = 1,
-        max_attempts_per_api_call: int = 10,
+        max_attempts_per_api_call: int = 40,
         num_candidates_per_completion: int = 1,
         is_valid: Callable[[str], bool] = lambda _: True,
         insufficient_valids_behaviour: Literal["error", "continue", "pad_invalids", "retry"] = "retry",
@@ -478,12 +470,16 @@ class InferenceAPI:
                     # If prompt is a single prompt and there is no cached result, simply return the original prompt for regular processing
                     prompt = prompt
 
+<<<<<<< HEAD
+        if isinstance(model_class, AnthropicChatModel) or isinstance(model_class, HuggingFaceModel):
+=======
         if (
             isinstance(model_class, AnthropicChatModel)
             or isinstance(model_class, HuggingFaceModel)
             or isinstance(model_class, OpenRouterChatModel)
             or isinstance(model_class, VLLMChatModel)
         ):
+>>>>>>> 11480a895f9e0035af02833f2e011eb25c17cec1
             if isinstance(model_class, HuggingFaceModel):
                 kwargs["model_url"] = huggingface_model_url
             # Anthropic chat doesn't support generating multiple candidates at once, so we have to do it manually
@@ -583,12 +579,12 @@ class InferenceAPI:
             )
         else:
             # At this point, the request should be for DeepSeek or OpenAI, which use the same API.
-            expected_chat_models = [OpenAIChatModel, OpenAICompletionModel]
+            expected_chat_models = [OpenAIChatModel, OpenAICompletionModel, VLLMChatModel]
             if not any(isinstance(model_class, model) for model in expected_chat_models):
                 raise RuntimeError(
                     f"Got unexpected ChatModel class: {model_class}. Make sure to implement logic to handle InferenceAPI.__call__ for your custom ChatModel. Or, add your ChatModel class to expected_chat_models above."
                 )
-            if model_class.base_url == DEEPSEEK_BASE_URL:
+            if not isinstance(model_class, VLLMChatModel) and model_class.base_url == DEEPSEEK_BASE_URL:
                 candidate_responses = []
                 for _ in range(num_candidates):  # DeepSeek doesn't support multiple completions.
                     async with self.deepseek_semaphore:

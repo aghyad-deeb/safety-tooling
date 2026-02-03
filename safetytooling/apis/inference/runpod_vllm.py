@@ -4,6 +4,7 @@ import logging
 import time
 from pathlib import Path
 from traceback import format_exc
+import json
 
 import aiohttp
 
@@ -14,6 +15,8 @@ from .model import InferenceAPIModel
 
 VLLM_MODELS = {
     "dummy": "https://pod-port.proxy.runpod.net/v1/chat/completions",
+    # Examples for RunPod serverless endpoints
+    # "your-model-id": "https://api.runpod.ai/v2/{endpoint_id}/run",
     "meta-llama/Llama-3.1-70B": "https://98gzngudd59oss-8000.proxy.runpod.net/v1/completions",
     "meta-llama/Llama-3.1-8B": "https://98gzngudd59oss-8000.proxy.runpod.net/v1/completions",
     "google/gemma-3-27b-pt": "https://98gzngudd59oss-8000.proxy.runpod.net/v1/completions",
@@ -24,6 +27,11 @@ LOGGER = logging.getLogger(__name__)
 
 
 class VLLMChatModel(InferenceAPIModel):
+    @staticmethod
+    def is_runpod_serverless(url: str) -> bool:
+        """Detect if URL is RunPod serverless endpoint"""
+        return "runpod.ai" in url and ("/run" in url or url.endswith("/run"))
+    
     def __init__(
         self,
         num_threads: int,
@@ -35,9 +43,14 @@ class VLLMChatModel(InferenceAPIModel):
         self.prompt_history_dir = prompt_history_dir
         self.available_requests = asyncio.BoundedSemaphore(int(self.num_threads))
 
+        self.vllm_api_key = vllm_api_key
         self.headers = {"Content-Type": "application/json"}
+        if self.vllm_api_key is not None:
+            self.headers["Authorization"] = f"Bearer {self.vllm_api_key}"
+
         self.vllm_base_url = vllm_base_url
-        if self.vllm_base_url.endswith("v1"):
+        # Only add /chat/completions for standard VLLM endpoints, not RunPod serverless
+        if self.vllm_base_url.endswith("v1") and not self.is_runpod_serverless(self.vllm_base_url):
             self.vllm_base_url += "/chat/completions"
 
         self.runpod_api_key = runpod_api_key
@@ -98,6 +111,13 @@ class VLLMChatModel(InferenceAPIModel):
                 LOGGER.error(f"API Error: {reason}")
                 raise RuntimeError(f"API Error: {reason}")
             return response
+    
+    async def run_query(self, model_url: str, messages: list, params: dict) -> dict:
+        """Route to appropriate query method based on URL type"""
+        if self.is_runpod_serverless(model_url):
+            return await self.run_query_serverless(model_url, messages, params)
+        else:
+            return await self.run_query_sync(model_url, messages, params)
 
     @staticmethod
     def convert_top_logprobs(data: dict) -> list[dict]:
@@ -122,6 +142,7 @@ class VLLMChatModel(InferenceAPIModel):
         print_prompt_and_response: bool,
         max_attempts: int,
         is_valid=lambda x: True,
+        logprobs: int | None = None,
         **kwargs,
     ) -> list[LLMResponse]:
         start = time.time()
@@ -136,9 +157,10 @@ class VLLMChatModel(InferenceAPIModel):
         api_duration = None
 
         kwargs["model"] = model_id
-        if "logprobs" in kwargs:
-            kwargs["top_logprobs"] = kwargs["logprobs"]
+        if logprobs is not None:
+            kwargs["top_logprobs"] = logprobs
             kwargs["logprobs"] = True
+            kwargs["prompt_logprobs"] = True
 
         for i in range(max_attempts):
             try:

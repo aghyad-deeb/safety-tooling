@@ -310,3 +310,7 @@ def load_jsonl_df(input_file: Path) -> pd.DataFrame:
         df = pd.json_normalize(df[0])
 
     return df
+
+
+def load_secrets(secrets_path: Path | str):
+    return os.environ

@@ -5,6 +5,7 @@ import dataclasses
 import json
 import logging
 import os
+import subprocess
 from pathlib import Path
 
 import simple_parsing
@@ -64,8 +65,7 @@ async def main(cfg: TogetherFTConfig, verbose: bool = True):
         validation_file=val_file_id,
         model=cfg.model,
         n_epochs=cfg.n_epochs,
-        n_checkpoints=cfg.n_evals,
-        n_evals=cfg.n_evals,
+        n_checkpoints=cfg.n_epochs,
         batch_size=cfg.batch_size,
         learning_rate=cfg.learning_rate,
         lora=cfg.lora,
@@ -73,12 +73,14 @@ async def main(cfg: TogetherFTConfig, verbose: bool = True):
         lora_r=cfg.lora_r,
         lora_alpha=cfg.lora_alpha,
         lora_dropout=cfg.lora_dropout,
+        lora_trainable_modules=cfg.lora_trainable_modules,
         wandb_api_key=os.environ.get("WANDB_API_KEY"),
         wandb_project_name=cfg.wandb_project_name,
     )
     LOGGER.info(f"Started fine-tuning job: {ft_job.id}")
 
     LOGGER.info("Waiting for fine-tuning job to finish...")
+    status = None
     while True:
         status = client.fine_tuning.retrieve(ft_job.id)  # https://docs.together.ai/reference/get_fine-tunes-id
         if status.status == "completed":
@@ -93,8 +95,8 @@ async def main(cfg: TogetherFTConfig, verbose: bool = True):
     LOGGER.info(f"Fine-tuning job finished with id <ft_id>{ft_job.id}</ft_id>")
 
     if cfg.save_folder is not None:
-        assert status.output_name is not None, "Output name is None"
-        output_name = status.output_name.replace("/", "|")
+        ft_job.output_name = status.output_name
+        ft_job.output_name = ft_job.output_name.replace("/", "|")
 
         if cfg.save_folder.endswith("/"):
             cfg.save_folder += f"{cfg.model}/{cfg.train_file.name.split('/')[-1].split('.')[0]}[id]{output_name}"
@@ -130,6 +132,7 @@ class TogetherFTConfig(FinetuneConfig):
     lora_r: int = 8
     lora_alpha: int = 8
     lora_dropout: float = 0.0
+    lora_trainable_modules: str = "all-linear"
     suffix: str = ""  # Together suffix to append to the model name
 
     save_model: bool = False

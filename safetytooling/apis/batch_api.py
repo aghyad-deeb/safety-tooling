@@ -2,7 +2,7 @@ import asyncio
 import logging
 import os
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Callable
 
 from safetytooling.apis.inference.anthropic import ANTHROPIC_MODELS, AnthropicModelBatch
 from safetytooling.apis.inference.cache_manager import get_cache_manager
@@ -13,7 +13,7 @@ from safetytooling.data_models import LLMParams, LLMResponse, Prompt
 LOGGER = logging.getLogger(__name__)
 
 
-def chunk_prompts_for_anthropic(prompts: list[Prompt], chunk_size: int = 100_000) -> list[list[Prompt]]:
+def chunk_prompts_for_anthropic(prompts: list[Prompt], chunk_size: int = 100_000, max_size_mb: float = 180) -> list[list[Prompt]]:
     # Calculate size per prompt in MB
     sizes = [len(str(prompt).encode("utf-8")) / (1024 * 1024) for prompt in prompts]
 
@@ -25,8 +25,8 @@ def chunk_prompts_for_anthropic(prompts: list[Prompt], chunk_size: int = 100_000
     for prompt, size in zip(prompts, sizes):
         # Check if adding this prompt would exceed either limit
         if (
-            current_size + size > 250 or current_count + 1 > chunk_size
-        ):  # 256 MB is the max size for Anthropic, but 250 MB is a safe limit
+            current_size + size > max_size_mb or current_count + 1 > chunk_size
+        ):  # 256 MB is the max size for Anthropic, using a safer limit
             if current_chunk:
                 chunks.append(current_chunk)
             print(f"Chunked prompts for Anthropic: {len(current_chunk)} prompts, {current_size} MB")
@@ -111,6 +111,7 @@ class BatchInferenceAPI:
         use_cache: bool = True,
         max_tokens: int | None = None,
         chunk: int | None = None,
+        batch_id_callback: Callable[[str], None] | None = None,
         **kwargs,
     ) -> tuple[list[LLMResponse], str]:
         """Make batch API requests for the specified model and prompts.
@@ -122,6 +123,7 @@ class BatchInferenceAPI:
             use_cache: Whether to use caching. Ignored if no_cache was set during initialization.
             max_tokens: Maximum number of tokens to generate per prompt. Setting different max_tokens for each prompt is not yet supported here, although it is in principle supported in the underlying API.\
             chunk: Maximum number of prompts to send in a single batch. If None, will use a default value based on the model.
+            batch_id_callback: Optional callback function that takes a batch ID string as an argument.
             **kwargs: Additional arguments to pass to the model. "seed" should be used for preventing cached responses from being used.
 
         Returns:
@@ -183,13 +185,14 @@ class BatchInferenceAPI:
         else:
             chunks = [uncached_prompts[i : i + chunk] for i in range(0, len(uncached_prompts), chunk)]
 
-        async def process_chunk(chunk_prompts) -> tuple[list[LLMResponse], str]:
+        async def process_chunk(chunk_prompts, callback_fn: Callable[[str], None] | None) -> tuple[list[LLMResponse], str]:
             print(f"Batch kwargs: {kwargs}")
             if model_id in ANTHROPIC_MODELS:
                 return await self._anthropic_batch(
                     model_id=model_id,
                     prompts=chunk_prompts,
                     max_tokens=kwargs.get("max_tokens", None),
+                    batch_id_callback=callback_fn,
                     **{k: v for k, v in kwargs.items() if k != "seed" and k != "max_tokens"},
                 )
             elif model_id in GPT_CHAT_MODELS:
@@ -198,6 +201,7 @@ class BatchInferenceAPI:
                     prompts=chunk_prompts,
                     log_dir=log_dir,
                     max_tokens=kwargs.get("max_tokens", None),
+                    #batch_id_callback=callback_fn,
                     **{k: v for k, v in kwargs.items() if k != "max_tokens"},
                 )
             else:
@@ -208,7 +212,7 @@ class BatchInferenceAPI:
             all_responses = []
             all_batch_ids = []
 
-            results = await asyncio.gather(*[process_chunk(chunk) for chunk in chunks])
+            results = await asyncio.gather(*[process_chunk(chunk, batch_id_callback) for chunk in chunks])
 
             for chunk_prompts, (responses, batch_id) in zip(chunks, results):
                 all_responses.extend(responses)
@@ -222,7 +226,7 @@ class BatchInferenceAPI:
 
         else:
             # Process all uncached prompts in a single batch
-            responses, batch_id = await process_chunk(uncached_prompts)
+            responses, batch_id = await process_chunk(uncached_prompts, batch_id_callback)
             all_responses = responses
             all_batch_ids = [batch_id]
 

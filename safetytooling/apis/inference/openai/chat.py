@@ -324,6 +324,7 @@ class OpenAIChatModel(OpenAIModel):
                     duration=duration,
                     cost=input_cost + output_cost,
                     logprobs=(self.convert_top_logprobs(choice.logprobs) if choice.logprobs is not None else None),
+                    reasoning_content=choice.message.reasoning if hasattr(choice.message, "reasoning") else None,
                     usage=total_usage,
                     generated_content=generated_content,
                 )
