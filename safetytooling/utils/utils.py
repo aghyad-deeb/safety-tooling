@@ -17,6 +17,10 @@ import jsonlines
 import pandas as pd
 import yaml
 
+# Load environment variables from ~/.env first, then fall back to current directory
+dotenv.load_dotenv(dotenv_path=Path.home() / ".env", override=True)
+dotenv.load_dotenv(override=True)
+
 LOGGER = logging.getLogger(__name__)
 
 LOGGING_LEVELS = {
@@ -49,13 +53,19 @@ def setup_environment(
     openrouter_tag: str = "OPENROUTER_API_KEY",
 ):
     setup_logging(logging_level)
-    load_success = dotenv.load_dotenv(override=True)
+    # First try to load from ~/.env
+    home_env_path = Path.home() / ".env"
+    load_success = dotenv.load_dotenv(dotenv_path=home_env_path, override=True)
     if not load_success:
-        load_success = dotenv.load_dotenv(dotenv_path="safety-tooling/.env", override=True)
+        # Fall back to current directory
+        load_success = dotenv.load_dotenv(override=True)
         if not load_success:
-            LOGGER.warning(
-                "No .env file found in repo or in safety-tooling submodule, some features may not work unless you set the environment variables manually"
-            )
+            # Fall back to safety-tooling/.env
+            load_success = dotenv.load_dotenv(dotenv_path="safety-tooling/.env", override=True)
+            if not load_success:
+                LOGGER.warning(
+                    "No .env file found in ~/.env, repo, or in safety-tooling submodule, some features may not work unless you set the environment variables manually"
+                )
 
     # users often have many API keys, this allows them to specify which one to use
     if openai_tag in os.environ:

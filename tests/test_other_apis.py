@@ -1,6 +1,7 @@
 import os
 import random
 import time
+from pathlib import Path
 
 import pytest
 from dotenv import load_dotenv
@@ -10,7 +11,8 @@ from safetytooling.apis.inference.openrouter import OpenRouterChatModel
 from safetytooling.apis.inference.together import TogetherChatModel
 from safetytooling.data_models import ChatMessage, MessageRole, Prompt
 
-# Load environment variables from .env file
+# Load environment variables from ~/.env first, then fall back to current directory
+load_dotenv(dotenv_path=Path.home() / ".env", override=True)
 load_dotenv()
 
 
